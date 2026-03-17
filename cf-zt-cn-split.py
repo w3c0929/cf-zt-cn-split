@@ -14,19 +14,16 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-MAX_RULES   = 4000
-MAX_IPS     = 3000  # gaoyifan china.txt 实际条目数约 3000
-MAX_DOMAINS = MAX_RULES - MAX_IPS  # 1000
+MAX_RULES        = 4000
+TARGET_DOMAIN_N  = 1000  # 期望域名条数，IP 用剩余配额
 
-# 域名：Loyalsoldier 精选直连域名
+# 域名：Loyalsoldier 精选直连域名（每行裸域名格式）
 DOMAIN_URL = "https://raw.githubusercontent.com/Loyalsoldier/surge-rules/release/direct.txt"
 
-# IP：gaoyifan 全运营商聚合版（已验证可用，~3000 条）
+# IP：gaoyifan 全运营商聚合版（实测 ~4397 条）
 IP_URL = "https://raw.githubusercontent.com/gaoyifan/china-operator-ip/ip-lists/china.txt"
 
 # 备用 IP 数据源
-# ipverse（当前 404，路径待确认）:
-#   https://raw.githubusercontent.com/ipverse/rir-ip/master/country/cn/ipv4-aggregate.txt
 # IPdeny aggregated (~2200 条):
 #   https://www.ipdeny.com/ipblocks/data/aggregated/cn-aggregated.zone
 # metowolf/iplist (~1700 条):
@@ -38,12 +35,17 @@ def get_cn_cidrs():
     r = requests.get(IP_URL, timeout=30)
     r.raise_for_status()
     cidrs = [line.strip() for line in r.text.splitlines() if line.strip() and not line.startswith('#')]
-    print(f"   IP 数据源获取到 {len(cidrs)} 条 CIDR，取前 {min(len(cidrs), MAX_IPS)} 条")
+    print(f"   IP 数据源获取到 {len(cidrs)} 条 CIDR")
     return cidrs
 
 
 def get_cn_domains():
-    """从 Loyalsoldier/surge-rules 拉取精选 CN 直连域名列表"""
+    """从 Loyalsoldier/surge-rules 拉取精选 CN 直连域名列表
+    
+    direct.txt 格式为每行一个裸域名，例如：
+        baidu.com
+        taobao.com
+    """
     r = requests.get(DOMAIN_URL, timeout=30)
     r.raise_for_status()
     domains = []
@@ -51,20 +53,24 @@ def get_cn_domains():
         line = line.strip()
         if not line or line.startswith('#'):
             continue
-        # surge-rules direct.txt 格式：DOMAIN-SUFFIX,baidu.com
+        # 兼容两种格式：裸域名 或 DOMAIN-SUFFIX,xxx
         if line.startswith('DOMAIN-SUFFIX,'):
-            d = line.replace('DOMAIN-SUFFIX,', '').strip()
-            if d:
-                domains.append(f"*.{d}")
+            line = line.replace('DOMAIN-SUFFIX,', '').strip()
+        if line:
+            domains.append(f"*.{line}")
     unique = list(set(domains))
-    print(f"   域名数据源获取到 {len(unique)} 条域名，取前 {min(len(unique), MAX_DOMAINS)} 条")
+    print(f"   域名数据源获取到 {len(unique)} 条域名")
     return unique
 
 
 def update_split_tunnels(cidrs, domains):
+    # 动态分配配额：域名取 TARGET_DOMAIN_N 条，剩余给 IP
+    max_domains = min(TARGET_DOMAIN_N, len(domains))
+    max_ips     = min(MAX_RULES - max_domains, len(cidrs))
+
     # 域名规则在前（DNS 层优先命中），IP 规则在后（网络层兜底）
-    domain_entries = [{"host":    d,    "description": "CN Domain"} for d    in domains[:MAX_DOMAINS]]
-    ip_entries     = [{"address": cidr, "description": "CN IP"}     for cidr in cidrs[:MAX_IPS]]
+    domain_entries = [{"host":    d,    "description": "CN Domain"} for d    in domains[:max_domains]]
+    ip_entries     = [{"address": cidr, "description": "CN IP"}     for cidr in cidrs[:max_ips]]
     routes = domain_entries + ip_entries
 
     print(f"   域名规则：{len(domain_entries)} 条 | IP 规则：{len(ip_entries)} 条 | 合计：{len(routes)} 条")
