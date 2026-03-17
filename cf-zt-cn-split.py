@@ -15,67 +15,64 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-MAX_RULES = 4000
+MAX_RULES   = 4000
+MAX_DOMAINS = 2500
+MAX_IPS     = MAX_RULES - MAX_DOMAINS  # 1500
 
-# 方案A：gaoyifan 全运营商聚合版，条目数 ~3000
-IP_URL = "https://raw.githubusercontent.com/gaoyifan/china-operator-ip/ip-lists/china.txt"
+# 域名：Loyalsoldier 精选直连域名（人工维护，质量高，条目可控）
+DOMAIN_URL = "https://raw.githubusercontent.com/Loyalsoldier/surge-rules/release/direct.txt"
 
-# 方案B（备用）：gaoyifan 按运营商分列，三大运营商合并去重（未聚合，条目数 ~8500）
-# OPERATOR_URLS = {
-#    "chinatelecom": "https://gaoyifan.github.io/china-operator-ip/chinanet.txt",
-#    "chinaunicom":  "https://gaoyifan.github.io/china-operator-ip/unicom.txt",
-#    "chinamobile":  "https://gaoyifan.github.io/china-operator-ip/cmcc.txt",
-# }
+# IP：ipverse 基于注册局数据的超网聚合（~1600 条，权威且条目少）
+IP_URL = "https://raw.githubusercontent.com/ipverse/rir-ip/master/country/cn/ipv4-aggregate.txt"
 
-# DOMAIN_URL = "https://raw.githubusercontent.com/felixonmars/dnsmasq-china-list/master/accelerated-domains.china.conf"
+# 备用 IP 数据源（按条目数从少到多）
+# IPdeny aggregated (~2200 条):
+#   https://www.ipdeny.com/ipblocks/data/aggregated/cn-aggregated.zone
+# metowolf/iplist (~1700 条):
+#   https://raw.githubusercontent.com/metowolf/iplist/master/data/special/china.txt
+# gaoyifan 聚合版 (~3000 条):
+#   https://raw.githubusercontent.com/gaoyifan/china-operator-ip/ip-lists/china.txt
 
 
 def get_cn_cidrs():
-    """从 gaoyifan 聚合列表拉取 CN CIDR"""
+    """从 ipverse 拉取基于注册局数据聚合的 CN CIDR 列表"""
     r = requests.get(IP_URL, timeout=30)
     r.raise_for_status()
-    return [line.strip() for line in r.text.splitlines() if line.strip() and not line.startswith('#')]
+    cidrs = [line.strip() for line in r.text.splitlines() if line.strip() and not line.startswith('#')]
+    print(f"   IP 数据源获取到 {len(cidrs)} 条 CIDR，取前 {min(len(cidrs), MAX_IPS)} 条")
+    return cidrs
 
 
-# def get_cn_cidrs_by_operator():
-#     """方案B（备用）：合并三大运营商 CIDR，去重后返回"""
-#     cidrs = []
-#     for name, url in OPERATOR_URLS.items():
-#         r = requests.get(url, timeout=30)
-#         r.raise_for_status()
-#         lines = [line.strip() for line in r.text.splitlines() if line.strip() and not line.startswith('#')]
-#         print(f"   {name}: {len(lines)} 条")
-#         cidrs += lines
-#     unique = list(set(cidrs))
-#     print(f"   去重后共 {len(unique)} 条")
-#     return unique
+def get_cn_domains():
+    """从 Loyalsoldier/surge-rules 拉取精选 CN 直连域名列表"""
+    r = requests.get(DOMAIN_URL, timeout=30)
+    r.raise_for_status()
+    domains = []
+    for line in r.text.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        # surge-rules direct.txt 格式：DOMAIN-SUFFIX,baidu.com
+        if line.startswith('DOMAIN-SUFFIX,'):
+            d = line.replace('DOMAIN-SUFFIX,', '').strip()
+            if d:
+                domains.append(f"*.{d}")
+    unique = list(set(domains))
+    print(f"   域名数据源获取到 {len(unique)} 条域名，取前 {min(len(unique), MAX_DOMAINS)} 条")
+    return unique
 
 
-# def get_cn_domains():
-#     r = requests.get(DOMAIN_URL, timeout=30)
-#     r.raise_for_status()
-#     domains = []
-#     for line in r.text.splitlines():
-#         if line.startswith('server=') and '/114' in line:
-#             m = re.search(r'server=/([^/]+)/', line)
-#             if m:
-#                 d = m.group(1)
-#                 if not d.startswith('*.'):
-#                     d = f"*.{d}"
-#                 domains.append(d)
-#     return list(set(domains))
+def update_split_tunnels(cidrs, domains):
+    # 域名规则在前（DNS 层优先命中），IP 规则在后（网络层兜底）
+    domain_entries = [{"host":    d,    "description": "CN Domain"} for d    in domains[:MAX_DOMAINS]]
+    ip_entries     = [{"address": cidr, "description": "CN IP"}     for cidr in cidrs[:MAX_IPS]]
+    routes = domain_entries + ip_entries
 
+    print(f"   域名规则：{len(domain_entries)} 条 | IP 规则：{len(ip_entries)} 条 | 合计：{len(routes)} 条")
 
-def update_split_tunnels(cidrs):
-    ip_entries = [{"address": cidr, "description": "CN IP"} for cidr in cidrs[:MAX_RULES]]
-
-    # 暂不合并域名，待配额充足后启用：
-    # domain_entries = [{"host": domain, "description": "CN Domain"} for domain in domains[:MAX_RULES]]
-    # routes = (ip_entries + domain_entries)[:MAX_RULES]
-    routes = ip_entries
-
-    if len(cidrs) > MAX_RULES:
-        print(f"⚠️  CIDR 共 {len(cidrs)} 条，超出限制，已截断至 {MAX_RULES} 条")
+    if len(routes) > MAX_RULES:
+        print(f"⚠️  规则总数超出限制，已截断至 {MAX_RULES} 条")
+        routes = routes[:MAX_RULES]
 
     if PROFILE_ID:
         url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{PROFILE_ID}/{MODE}"
@@ -91,11 +88,7 @@ def update_split_tunnels(cidrs):
 
 
 if __name__ == "__main__":
-    print("🔄 拉取最新 CN geo 数据（gaoyifan 聚合版）...")
-    cidrs = get_cn_cidrs()
-    print(f"   获取到 {len(cidrs)} 条 CIDR（最多取前 {MAX_RULES} 条）")
-
-    # domains = get_cn_domains()
-    # print(f"   获取到 {len(domains)} 条域名")
-
-    update_split_tunnels(cidrs)
+    print("🔄 拉取最新 CN geo 数据...")
+    cidrs   = get_cn_cidrs()
+    domains = get_cn_domains()
+    update_split_tunnels(cidrs, domains)
