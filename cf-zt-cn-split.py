@@ -1,5 +1,6 @@
 import requests
 import os
+import re
 
 CF_API_TOKEN = os.getenv("CF_API_TOKEN")
 ACCOUNT_ID   = os.getenv("CF_ACCOUNT_ID")
@@ -14,10 +15,13 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-MAX_RULES        = 4000
-TARGET_DOMAIN_N  = 1000  # 期望域名条数，IP 用剩余配额
+MAX_RULES       = 4000
+TARGET_DOMAIN_N = 1000  # 期望域名条数，剩余配额给 IP
 
-# 域名：Loyalsoldier 精选直连域名（每行裸域名格式）
+# 合法域名正则：只保留标准域名格式，过滤脏数据
+VALID_DOMAIN_RE = re.compile(r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$')
+
+# 域名：Loyalsoldier 精选直连域名
 DOMAIN_URL = "https://raw.githubusercontent.com/Loyalsoldier/surge-rules/release/direct.txt"
 
 # IP：gaoyifan 全运营商聚合版（实测 ~4397 条）
@@ -40,12 +44,7 @@ def get_cn_cidrs():
 
 
 def get_cn_domains():
-    """从 Loyalsoldier/surge-rules 拉取精选 CN 直连域名列表
-    
-    direct.txt 格式为每行一个裸域名，例如：
-        baidu.com
-        taobao.com
-    """
+    """从 Loyalsoldier/surge-rules 拉取精选 CN 直连域名列表，过滤非法格式"""
     r = requests.get(DOMAIN_URL, timeout=30)
     r.raise_for_status()
     domains = []
@@ -53,13 +52,16 @@ def get_cn_domains():
         line = line.strip()
         if not line or line.startswith('#'):
             continue
-        # 兼容两种格式：裸域名 或 DOMAIN-SUFFIX,xxx
+        # 兼容 DOMAIN-SUFFIX,xxx 格式
         if line.startswith('DOMAIN-SUFFIX,'):
             line = line.replace('DOMAIN-SUFFIX,', '').strip()
-        if line:
+        # 去掉前导点（如 .baidu.com → baidu.com）
+        line = line.lstrip('.')
+        # 只保留合法域名格式，过滤脏数据
+        if line and VALID_DOMAIN_RE.match(line):
             domains.append(f"*.{line}")
     unique = list(set(domains))
-    print(f"   域名数据源获取到 {len(unique)} 条域名")
+    print(f"   域名数据源获取到 {len(unique)} 条域名（已过滤非法格式）")
     return unique
 
 
