@@ -16,7 +16,7 @@ HEADERS = {
 }
 
 MAX_RULES       = 4000
-TARGET_DOMAIN_N = 1000  # 期望域名条数，剩余配额给 IP
+TARGET_DOMAIN_N = 100  # 期望域名条数，剩余配额给 IP
 
 # 合法域名正则：只保留标准域名格式，过滤脏数据
 VALID_DOMAIN_RE = re.compile(r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$')
@@ -24,8 +24,8 @@ VALID_DOMAIN_RE = re.compile(r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)
 # 域名：Loyalsoldier 精选直连域名
 DOMAIN_URL = "https://raw.githubusercontent.com/Loyalsoldier/surge-rules/release/direct.txt"
 
-# IP：gaoyifan 全运营商聚合版（实测 ~4397 条）
-IP_URL = "https://raw.githubusercontent.com/gaoyifan/china-operator-ip/ip-lists/china.txt"
+# IP：GeoIP2-CN
+IP_URL = "https://raw.githubusercontent.com/soffchen/GeoIP2-CN/release/CN-ip-cidr.txt"
 
 # 备用 IP 数据源
 # IPdeny aggregated (~2200 条):
@@ -35,7 +35,7 @@ IP_URL = "https://raw.githubusercontent.com/gaoyifan/china-operator-ip/ip-lists/
 
 
 def get_cn_cidrs():
-    """从 gaoyifan 拉取全运营商聚合的 CN CIDR 列表"""
+    """从GeoIP2-CN 拉取聚合的 CN CIDR 列表"""
     r = requests.get(IP_URL, timeout=30)
     r.raise_for_status()
     cidrs = [line.strip() for line in r.text.splitlines() if line.strip() and not line.startswith('#')]
