@@ -21,7 +21,7 @@ HEADERS = {
 
 # ==================== 可自定义参数 ====================
 MAX_RULES               = 4000
-TARGET_COMMON_DOMAIN_NUM = 200  # 自行设置通用surge直连域名最多取多少条
+TARGET_COMMON_DOMAIN_NUM = 0  # 自行设置通用surge直连域名最多取多少条
 # ======================================================
 
 VALID_DOMAIN_RE = re.compile(r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$')
