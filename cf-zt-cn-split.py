@@ -37,21 +37,21 @@ get_env = load_local_env()
 
 # 读取配置
 CF_API_TOKEN = get_env("CF_API_TOKEN")
-ACCOUNT_ID   = get_env("ACCOUNT_ID")
-PROFILE_ID   = get_env("PROFILE_ID", "")
+CF_ACCOUNT_ID = get_env("CF_ACCOUNT_ID")
+CF_PROFILE_ID = get_env("CF_PROFILE_ID", "")
 MODE         = get_env("MODE", "exclude")
 ALLOWED_MODES = {"exclude", "include"}
 
 # 调试打印
 print("\n===== 调试变量 =====")
 print(f"CF_API_TOKEN: {CF_API_TOKEN if CF_API_TOKEN else 'None'}")
-print(f"ACCOUNT_ID: {ACCOUNT_ID if ACCOUNT_ID else 'None'}")
-print(f"PROFILE_ID: {PROFILE_ID}")
+print(f"CF_ACCOUNT_ID: {CF_ACCOUNT_ID if CF_ACCOUNT_ID else 'None'}")
+print(f"CF_PROFILE_ID: {CF_PROFILE_ID}")
 print(f"MODE: {MODE}")
 print("====================\n")
 
 # 参数校验
-if not all([CF_API_TOKEN, ACCOUNT_ID]):
+if not all([CF_API_TOKEN, CF_ACCOUNT_ID]):
     raise ValueError("缺少环境变量！请配置 .env 文件或在 GitHub Secrets 设置 CF_API_TOKEN、CF_ACCOUNT_ID")
 if MODE not in ALLOWED_MODES:
     raise ValueError(f"非法 MODE: {MODE}，允许值：{'/'.join(sorted(ALLOWED_MODES))}")
@@ -152,10 +152,10 @@ def update_split_tunnels(cidrs, common_domains, custom_domains, custom_cidrs):
         print(f"⚠️ 规则超上限，截断至 {MAX_RULES} 条")
         routes = routes[:MAX_RULES]
 
-    if PROFILE_ID:
-        api_url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{PROFILE_ID}/{MODE}"
+    if CF_PROFILE_ID:
+        api_url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/devices/policy/{CF_PROFILE_ID}/{MODE}"
     else:
-        api_url = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/devices/policy/{MODE}"
+        api_url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/devices/policy/{MODE}"
 
     resp = requests.put(api_url, json=routes, headers=HEADERS)
     if resp.status_code in (200, 204):
