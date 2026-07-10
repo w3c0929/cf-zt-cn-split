@@ -47,6 +47,19 @@ ff05::/16
 *.dropbox.com
 *.yunpan.com
 
+# 游戏资源
+*.flysheep6.com
+*.xyg688.com
+*.zzzzz688.com
+*.gobing.cn
+*.xunlei.com
+*.kuai8.com
+*.xdgame.com
+*.caimogu.cc
+*.wlgooo.com
+*.lzlgo.com
+*.clg88.me
+
 # 搜索综合
 *.baidu.com
 *.ha123.com
