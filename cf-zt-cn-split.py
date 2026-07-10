@@ -19,23 +19,40 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-MAX_RULES       = 4000
-TARGET_DOMAIN_N = 0  # 期望域名条数，剩余配额给 IP
+# ==================== 可自定义参数 ====================
+MAX_RULES               = 4000
+TARGET_COMMON_DOMAIN_NUM = 200  # 自行设置通用surge直连域名最多取多少条
+# ======================================================
 
-# 合法域名正则：只保留标准域名格式，过滤脏数据
 VALID_DOMAIN_RE = re.compile(r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$')
 
-# 域名：Loyalsoldier 精选直连域名
+# 数据源地址
 DOMAIN_URL = "https://raw.githubusercontent.com/Loyalsoldier/surge-rules/release/direct.txt"
-
-# IP：GeoIP2-CN
 IP_URL = "https://raw.githubusercontent.com/soffchen/GeoIP2-CN/release/CN-ip-cidr.txt"
+MYDOMAIN_FILE = "mydomain.txt"
 
-# 备用 IP 数据源
-# IPdeny aggregated (~2200 条):
-#   https://www.ipdeny.com/ipblocks/data/aggregated/cn-aggregated.zone
-# metowolf/iplist (~1700 条):
-#   https://raw.githubusercontent.com/metowolf/iplist/master/data/special/china.txt
+
+def get_myhost_domains():
+    """读取本地 mydomain.txt 自定义域名，兼容 *.xxx.com 格式，第一优先级"""
+    mydomain_list = []
+    if os.path.exists(MYDOMAIN_FILE):
+        with open(MYDOMAIN_FILE, "r", encoding="utf-8") as f:
+            for line in f.readlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                # 去除行首 *. 兼容用户填写泛域名格式
+                if line.startswith("*."):
+                    line = line[2:]
+                # 去除前导点
+                line = line.lstrip(".")
+                if VALID_DOMAIN_RE.match(line):
+                    mydomain_list.append(f"*.{line}")
+        mydomain_list = list(set(mydomain_list))
+        print(f"   自定义域名(mydomain.txt)获取到 {len(mydomain_list)} 条")
+    else:
+        print(f"   未找到 {MYDOMAIN_FILE}，跳过自定义域名")
+    return mydomain_list
 
 
 def get_cn_cidrs():
@@ -65,21 +82,38 @@ def get_cn_domains():
         if line and VALID_DOMAIN_RE.match(line):
             domains.append(f"*.{line}")
     unique = list(set(domains))
-    print(f"   域名数据源获取到 {len(unique)} 条域名（已过滤非法格式）")
+    print(f"   通用直连域名数据源总条数: {len(unique)} 条，限制最多取 {TARGET_COMMON_DOMAIN_NUM} 条")
     return unique
 
 
-def update_split_tunnels(cidrs, domains):
-    # 动态分配配额：域名取 TARGET_DOMAIN_N 条，剩余给 IP
-    max_domains = min(TARGET_DOMAIN_N, len(domains))
-    max_ips     = min(MAX_RULES - max_domains, len(cidrs))
+def update_split_tunnels(cidrs, common_domains, custom_domains):
+    routes = []
+    remain_quota = MAX_RULES
 
-    # 域名规则在前（DNS 层优先命中），IP 规则在后（网络层兜底）
-    domain_entries = [{"host":    d,    "description": "CN Domain"} for d    in domains[:max_domains]]
-    ip_entries     = [{"address": cidr, "description": "CN IP"}     for cidr in cidrs[:max_ips]]
-    routes = domain_entries + ip_entries
+    # 1. 第一优先级：自定义 mydomain 域名
+    custom_entries = [{"host": d, "description": "Custom Host(mydomain.txt)"} for d in custom_domains[:remain_quota]]
+    routes.extend(custom_entries)
+    remain_quota -= len(custom_entries)
+    final_custom = len(custom_entries)
 
-    print(f"   域名规则：{len(domain_entries)} 条 | IP 规则：{len(ip_entries)} 条 | 合计：{len(routes)} 条")
+    final_common = 0
+    final_ip = 0
+
+    if remain_quota > 0:
+        # 2. 第二优先级：通用直连域名，最多取 TARGET_COMMON_DOMAIN_NUM 条
+        take_common = min(TARGET_COMMON_DOMAIN_NUM, remain_quota, len(common_domains))
+        common_entries = [{"host": d, "description": "CN Domain(Common)"} for d in common_domains[:take_common]]
+        routes.extend(common_entries)
+        remain_quota -= len(common_entries)
+        final_common = len(common_entries)
+
+        if remain_quota > 0:
+            # 3. 第三优先级：CN IP CIDR，剩余配额全部填充IP
+            ip_entries = [{"address": cidr, "description": "CN IP"} for cidr in cidrs[:remain_quota]]
+            routes.extend(ip_entries)
+            final_ip = len(ip_entries)
+
+    print(f"   自定义域名规则：{final_custom} 条 | 通用域名规则：{final_common} 条 | IP 规则：{final_ip} 条 | 合计：{len(routes)} 条")
 
     if len(routes) > MAX_RULES:
         print(f"⚠️  规则总数超出限制，已截断至 {MAX_RULES} 条")
@@ -95,11 +129,14 @@ def update_split_tunnels(cidrs, domains):
         print(f"✅ 同步成功！{len(routes)} 条路由 | Mode: {MODE}")
     else:
         print(f"❌ 失败 {resp.status_code}: Cloudflare API 请求未成功")
+        print("API 返回详情:", resp.text)
         resp.raise_for_status()
 
 
 if __name__ == "__main__":
     print("🔄 拉取最新 CN geo 数据...")
-    cidrs   = get_cn_cidrs()
-    domains = get_cn_domains()
-    update_split_tunnels(cidrs, domains)
+    # 按优先级顺序加载三类数据
+    custom_hosts = get_myhost_domains()
+    common_domains = get_cn_domains()
+    cidr_list = get_cn_cidrs()
+    update_split_tunnels(cidr_list, common_domains, custom_hosts)
