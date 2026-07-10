@@ -18,6 +18,35 @@ ff05::/16
 
 # ========== 自定义域名 ==========
 
+# 网盘
+*.115.com
+*.123pan.com
+*.ctfile.com
+*.ysepan.com
+*.pc.woozooo.com
+*.jianguoyun.com
+*.pan.baidu.com
+*.pan.wo.cnpan
+*.yun.139.com
+*.cloud.189.cn
+*.feijipan.com
+*.alipan.com
+*.pan.quark.cn
+*.guangyapan.com
+*.pan.xunlei.com
+*.login.live.com
+*.icloud.com.cn
+*.cloud.oppo.com
+*.i.mi.com
+*.yun.vivo.com.cn
+*.seafile.com
+*.mega.nz
+*.cloud.huawei.com
+*.data.cstcloud.cn
+*.kdocs.cn
+*.dropbox.com
+*.yunpan.com
+
 # 搜索综合
 *.baidu.com
 *.ha123.com
