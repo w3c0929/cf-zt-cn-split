@@ -56,6 +56,15 @@ if not all([CF_API_TOKEN, CF_ACCOUNT_ID]):
 if MODE not in ALLOWED_MODES:
     raise ValueError(f"非法 MODE: {MODE}，允许值：{'/'.join(sorted(ALLOWED_MODES))}")
 
+# 解析 profile 列表
+# CF_PROFILE_ID 支持逗号分隔的多个策略 ID，如 profile1,profile2,profile3
+# 列表中写几个就更新几个（一个/多个/全部），留空则使用默认设备策略
+TARGET_PROFILES = [p.strip() for p in CF_PROFILE_ID.split(",") if p.strip()]
+if TARGET_PROFILES:
+    print(f"ℹ️ 本次将更新 {len(TARGET_PROFILES)} 个策略：{TARGET_PROFILES}\n")
+else:
+    print("ℹ️ 未配置 CF_PROFILE_ID，使用默认设备策略\n")
+
 HEADERS = {
     "Authorization": f"Bearer {CF_API_TOKEN}",
     "Content-Type": "application/json"
@@ -152,18 +161,23 @@ def update_split_tunnels(cidrs, common_domains, custom_domains, custom_cidrs):
         print(f"⚠️ 规则超上限，截断至 {MAX_RULES} 条")
         routes = routes[:MAX_RULES]
 
-    if CF_PROFILE_ID:
-        api_url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/devices/policy/{CF_PROFILE_ID}/{MODE}"
-    else:
-        api_url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/devices/policy/{MODE}"
+    # 无指定策略时更新默认设备策略，否则逐个更新目标策略
+    targets = TARGET_PROFILES if TARGET_PROFILES else [None]
+    for idx, profile_id in enumerate(targets, start=1):
+        if profile_id:
+            api_url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/devices/policy/{profile_id}/{MODE}"
+            label = f"策略[{idx}/{len(targets)}] {profile_id}"
+        else:
+            api_url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/devices/policy/{MODE}"
+            label = "默认策略"
 
-    resp = requests.put(api_url, json=routes, headers=HEADERS)
-    if resp.status_code in (200, 204):
-        print(f"✅ 同步完成！共 {len(routes)} 条路由，模式：{MODE}")
-    else:
-        print(f"❌ API请求失败，状态码：{resp.status_code}")
-        print("返回详情：", resp.text)
-        resp.raise_for_status()
+        resp = requests.put(api_url, json=routes, headers=HEADERS)
+        if resp.status_code in (200, 204):
+            print(f"✅ 同步完成！{label} | 共 {len(routes)} 条路由，模式：{MODE}")
+        else:
+            print(f"❌ API请求失败！{label} | 状态码：{resp.status_code}")
+            print("返回详情：", resp.text)
+            resp.raise_for_status()
 
 if __name__ == "__main__":
     print("🔄 开始拉取CN域名与IP数据...")

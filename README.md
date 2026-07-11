@@ -10,6 +10,7 @@
 - 通过 `mydomain.txt` 统一管理自定义直连域名与 IP/CIDR（含内网保留网段）
 - 自定义规则优先加载，CN 公网 IP 段兜底填满剩余配额，在 4000 条限额内最大化分流准确性
 - 通过 Cloudflare Zero Trust API 更新设备策略的 Split Tunnels 规则
+- 支持一次更新多个设备策略（`CF_PROFILE_ID` 逗号分隔，写几个更新几个）
 - 支持 `exclude`（CN 直连）和 `include`（仅 CN 走 WARP）两种模式
 - 通过 GitHub Actions 定时自动运行，无需手动维护
 
@@ -65,7 +66,7 @@
 |---------------|----------------------------------------------------------|----|
 |`CF_API_TOKEN` |Cloudflare API Token，需具备 Zero Trust 写权限                   |✅必填  |
 |`CF_ACCOUNT_ID`|Cloudflare 账户 ID，可在控制台右侧边栏找到                              |✅必填  |
-|`CF_PROFILE_ID`|设备策略 ID，留空则使用默认策略                                         |❌可选  |
+|`CF_PROFILE_ID`|设备策略 ID，支持逗号分隔多个（如 `id1,id2,id3`），留空则使用默认策略        |❌可选  |
 |`MODE`         |分流模式：`exclude`（CN 直连）或 `include`（仅 CN 走 WARP），默认 `exclude`|❌可选  |
 
 #### 如何获取 API Token
@@ -94,8 +95,13 @@
 
 ### 设备策略（CF_PROFILE_ID）
 
-- **留空**：更新默认设备策略的 Split Tunnels 规则
-- **填写策略 ID**：更新指定的自定义设备策略
+`CF_PROFILE_ID` 支持逗号分隔多个策略 ID，脚本会依次更新列表中的每一个：
+
+- **留空**：更新账户的默认设备策略
+- **单个 ID**（如 `profile1`）：只更新该策略
+- **多个 ID**（如 `profile1,profile2,profile3`）：按顺序逐个更新，写几个就更新几个
+
+> 需要更新哪些策略就在列表里写哪些，顺序、数量均可自定义。运行时会打印 `本次将更新 N 个策略：[...]`，并对每个策略输出 `✅ 同步完成！策略[i/n] ...`。
 
 -----
 
@@ -146,29 +152,31 @@ pip install requests
 # 方式一：在项目根目录创建 .env 文件
 CF_API_TOKEN=your_api_token
 CF_ACCOUNT_ID=your_account_id
-CF_PROFILE_ID=          # 留空使用默认策略
+CF_PROFILE_ID=          # 留空=默认策略；多个用逗号分隔，如 id1,id2,id3
 MODE=exclude
 
 # 方式二：设置系统环境变量（.env 不存在时兜底读取）
 export CF_API_TOKEN="your_api_token"
 export CF_ACCOUNT_ID="your_account_id"
-export CF_PROFILE_ID=""   # 留空使用默认策略
+export CF_PROFILE_ID=""   # 留空=默认策略；多个用逗号分隔，如 id1,id2,id3
 export MODE="exclude"
 
 # 运行脚本
 python cf-zt-cn-split.py
 ```
 
-正常输出示例：
+正常输出示例（以更新 2 个策略为例）：
 
 ```
+ℹ️ 本次将更新 2 个策略：['profile1', 'profile2']
 🔄 开始拉取CN域名与IP数据...
    自定义域名(mydomain.txt)：xxx 条
    自定义CIDR(mydomain.txt)：xx 条
    通用CN域名总数：xxxx，限制取 0 条
    CN IP CIDR 数据源：xxxx 条
    自定义CIDR:xx | 自定义域名:xxx | 通用域名:0 | CN公网IP:xxxx | 总规则:4000
-✅ 同步完成！共 4000 条路由，模式：exclude
+✅ 同步完成！策略[1/2] profile1 | 共 4000 条路由，模式：exclude
+✅ 同步完成！策略[2/2] profile2 | 共 4000 条路由，模式：exclude
 ```
 
 -----
