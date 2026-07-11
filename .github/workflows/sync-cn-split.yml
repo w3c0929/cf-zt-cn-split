@@ -25,6 +25,6 @@ jobs:
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          CF_PROFILE_ID: ${{ secrets.CF_PROFILE_ID }}
+          CF_PROFILE_ID: ${{ secrets.CF_PROFILE_ID }}   # 支持逗号分隔多个策略ID，写几个更新几个；留空=默认策略
           MODE: exclude                     # 可改成 include
         run: python cf-zt-cn-split.py
