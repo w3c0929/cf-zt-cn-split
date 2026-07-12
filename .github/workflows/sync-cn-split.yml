@@ -1,4 +1,4 @@
-name: 每日同步 CN Split Tunnels 到 Cloudflare Zero Trust
+name: 每周同步 CN Split Tunnels 到 Cloudflare Zero Trust
 permissions:
   contents: read
 
