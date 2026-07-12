@@ -80,7 +80,7 @@ ALLOWED_MODES = {"exclude", "include"}
 # ===================== 功能控制配置（仅保留功能1 更新分流） =====================
 # RUN_UPDATE：true=更新指定序号策略分流规则 false=跳过更新
 RUN_UPDATE = get_env("RUN_UPDATE", "true")
-# CF_PROFILE_INDEX：逗号分隔数字，指定需要更新的策略序号，仅1~N有效，0默认策略不支持更新
+# CF_PROFILE_INDEX：逗号分隔数字，指定需要更新的策略序号，0=账号默认设备策略，1~N=自定义策略
 CF_PROFILE_INDEX = get_env("CF_PROFILE_INDEX", "")
 # 布尔值合法白名单
 ALLOWED_BOOL = {"true", "false"}
@@ -111,7 +111,7 @@ if RUN_UPDATE.lower() not in ALLOWED_BOOL:
 ALL_PROFILES = [p.strip() for p in CF_PROFILE_ID.split(",") if p.strip()]
 max_custom_num = len(ALL_PROFILES)
 print(f"ℹ️ 策略索引对照表：")
-print(f"   [0] 账号默认设备策略（仅可切换，无法批量更新）")
+print(f"   [0] 账号默认设备策略（未匹配自定义策略的设备回落至此）")
 for idx, pid in enumerate(ALL_PROFILES, start=1):
     print(f"   [{idx}] {pid}")
 print()
@@ -126,12 +126,9 @@ if CF_PROFILE_INDEX.strip():
             num = int(num_str)
         except ValueError:
             raise ValueError(f"CF_PROFILE_INDEX 仅允许填写数字，非法值：{num_str}")
-        # 0默认策略禁止更新，抛出提示
-        if num == 0:
-            raise ValueError("CF_PROFILE_INDEX 不支持填写0，默认策略无法批量更新分流规则")
-        # 校验序号在自定义策略范围内
-        if num < 1 or num > max_custom_num:
-            raise ValueError(f"更新序号{num}超出范围！可用更新序号：1 ~ {max_custom_num}")
+        # 校验序号范围：0=默认策略，1~N=自定义策略
+        if num < 0 or num > max_custom_num:
+            raise ValueError(f"更新序号{num}超出范围！可用更新序号：0（默认策略） 或 1 ~ {max_custom_num}")
         update_target_index_list.append(num)
     # 去重并排序
     update_target_index_list = sorted(list(set(update_target_index_list)))
@@ -291,10 +288,14 @@ def update_selected_split_tunnels(routes):
         return
     # 遍历配置的待更新序号
     for seq, target_idx in enumerate(update_target_index_list, start=1):
-        # 序号转列表下标
-        profile_id = ALL_PROFILES[target_idx - 1]
-        api_url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/devices/policy/{profile_id}/{MODE}"
-        label = f"策略[{target_idx}] {profile_id} ({seq}/{len(update_target_index_list)})"
+        # 序号0=默认策略（URL不带profile_id）；1~N=对应自定义策略
+        if target_idx == 0:
+            api_url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/devices/policy/{MODE}"
+            label = f"策略[0] 账号默认设备策略 ({seq}/{len(update_target_index_list)})"
+        else:
+            profile_id = ALL_PROFILES[target_idx - 1]
+            api_url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/devices/policy/{profile_id}/{MODE}"
+            label = f"策略[{target_idx}] {profile_id} ({seq}/{len(update_target_index_list)})"
 
         # PUT请求提交分流规则
         resp = requests.put(api_url, json=routes, headers=HEADERS)
