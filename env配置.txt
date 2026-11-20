@@ -14,6 +14,8 @@ MODE=exclude
 
 # 功能开关1：是否更新指定序号策略内的分流规则
 RUN_UPDATE=true
+# 功能开关2：是否把 mydomain.txt 的域名同步到策略的 Local Domain Fallback
+SYNC_FALLBACK=true
 # 指定需要更新的策略序号，多个用逗号分隔；空=不更新任何自定义策略
 # 示例：仅更新序号1邮箱、3苹果策略
 CF_PROFILE_INDEX=3

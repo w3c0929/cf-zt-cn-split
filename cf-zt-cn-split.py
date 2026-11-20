@@ -8,7 +8,7 @@ import re
 
 # ===================== 全局自定义常量（无需修改） =====================
 # 单策略最大分流规则条数限制
-MAX_RULES               = 16
+MAX_RULES               = 4000
 # 通用CN域名取用数量，0=不加载公共域名
 TARGET_COMMON_DOMAIN_NUM = 0
 # ====================================================
@@ -49,8 +49,11 @@ def load_local_env():
                 continue
             # 存入环境字典
             env_dict[key] = val
-            # 长值截断展示，避免日志刷屏
-            show_val = val[:20] + "..." if len(val) > 20 else val
+            # 敏感值（TOKEN/SECRET/KEY）整体掩码，其余长值截断展示，避免日志刷屏与泄露
+            if any(k in key.upper() for k in ("TOKEN", "SECRET", "KEY")):
+                show_val = "***"
+            else:
+                show_val = val[:20] + "..." if len(val) > 20 else val
             print(f"ℹ️ 加载 {key} = {show_val}")
     # 内部函数：优先读取.env，不存在则读取系统环境变量
     def get_env(key, default=None):
@@ -82,16 +85,19 @@ ALLOWED_MODES = {"exclude", "include"}
 RUN_UPDATE = get_env("RUN_UPDATE", "true")
 # CF_PROFILE_INDEX：逗号分隔数字，指定需要更新的策略序号，0=账号默认设备策略，1~N=自定义策略
 CF_PROFILE_INDEX = get_env("CF_PROFILE_INDEX", "")
+# SYNC_FALLBACK：true=把 mydomain.txt 的域名同步到策略的 Local Domain Fallback，false=跳过
+SYNC_FALLBACK = get_env("SYNC_FALLBACK", "true")
 # 布尔值合法白名单
 ALLOWED_BOOL = {"true", "false"}
 
 # ===================== 打印调试信息 =====================
 print("\n===== 调试变量 =====")
-print(f"CF_API_TOKEN: {CF_API_TOKEN if CF_API_TOKEN else 'None'}")
+print(f"CF_API_TOKEN: {'***' + CF_API_TOKEN[-4:] if CF_API_TOKEN else 'None'}")
 print(f"CF_ACCOUNT_ID(全局公共账号): {CF_ACCOUNT_ID if CF_ACCOUNT_ID else 'None'}")
 print(f"CF_PROFILE_ID(全部自定义策略): {CF_PROFILE_ID}")
 print(f"RUN_UPDATE(更新分流开关): {RUN_UPDATE}")
 print(f"CF_PROFILE_INDEX(待更新策略序号): {CF_PROFILE_INDEX}")
+print(f"SYNC_FALLBACK(同步本地域名回退): {SYNC_FALLBACK}")
 print(f"MODE: {MODE}")
 print("====================\n")
 
@@ -105,6 +111,9 @@ if MODE not in ALLOWED_MODES:
 # 功能开关只能填写true/false
 if RUN_UPDATE.lower() not in ALLOWED_BOOL:
     raise ValueError("RUN_UPDATE 仅支持 true/false")
+# 本地域名回退开关只能填写true/false
+if SYNC_FALLBACK.lower() not in ALLOWED_BOOL:
+    raise ValueError("SYNC_FALLBACK 仅支持 true/false")
 
 # ===================== 解析自定义策略ID列表，生成索引对照表 =====================
 # 分割逗号、去除空值、清理空格，得到纯自定义策略ID数组
@@ -308,11 +317,49 @@ def update_selected_split_tunnels(routes):
             print("返回详情：", resp.text)
             resp.raise_for_status()
 
+# ===================== 函数：同步 Local Domain Fallback =====================
+def sync_fallback_domains(local_suffixes):
+    if not local_suffixes:
+        print("ℹ️ mydomain.txt 中没有域名，跳过 fallback 同步")
+        return
+    # 遍历配置的待更新序号，与分流规则保持同一批策略
+    for seq, target_idx in enumerate(update_target_index_list, start=1):
+        # 序号0=默认策略（URL不带profile_id）；1~N=对应自定义策略
+        if target_idx == 0:
+            api_url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/devices/policy/fallback_domains"
+            label = f"策略[0] 账号默认设备策略 ({seq}/{len(update_target_index_list)})"
+        else:
+            profile_id = ALL_PROFILES[target_idx - 1]
+            api_url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/devices/policy/{profile_id}/fallback_domains"
+            label = f"策略[{target_idx}] ({seq}/{len(update_target_index_list)})"
+
+        # 读取策略现有 fallback（含 Cloudflare 默认项），做并集，避免覆盖丢失
+        r = requests.get(api_url, headers=HEADERS, timeout=30)
+        r.raise_for_status()
+        existing = [item["suffix"] for item in (r.json().get("result") or [])]
+        merged = sorted(set(existing) | set(local_suffixes))
+        added = sorted(set(local_suffixes) - set(existing))
+
+        # 全量提交合并后的列表
+        resp = requests.put(api_url, json=[{"suffix": s} for s in merged], headers=HEADERS, timeout=60)
+        # 200/204代表更新成功
+        if resp.status_code in (200, 204):
+            print(f"✅ fallback 更新完成！{label} | {len(merged)} 条（本次新增 {len(added)}）")
+        else:
+            # 更新失败打印错误信息并终止
+            print(f"❌ 更新 fallback 失败 {label} 状态码:{resp.status_code}")
+            print("返回详情：", resp.text)
+            resp.raise_for_status()
+
+
 # ===================== 程序入口主逻辑 =====================
 if __name__ == "__main__":
     print("🔄 拉取CN域名、IP、自定义规则数据...")
     # 读取本地自定义规则
     cust_dom, cust_cidr = get_myhost_content()
+    # mydomain.txt 中的直连域名自动作为 fallback（CIDR 不参与，fallback 只接受域名后缀）
+    fallback_suffixes = sorted({d[2:] if d.startswith("*.") else d for d in cust_dom})
+    print(f"   fallback 域名（来自 mydomain.txt）：{len(fallback_suffixes)} 条")
     # 拉取公共国内域名
     cn_domains = get_cn_domains()
     # 拉取公共国内IP网段
@@ -324,8 +371,12 @@ if __name__ == "__main__":
     if RUN_UPDATE.lower() == "true":
         print("\n===== 执行更新指定序号策略分流规则 =====")
         update_selected_split_tunnels(route_data)
+        # 分流更新后再同步本地域名回退
+        if SYNC_FALLBACK.lower() == "true":
+            print("\n===== 同步 Local Domain Fallback =====")
+            sync_fallback_domains(fallback_suffixes)
     else:
-        print("\nℹ️ RUN_UPDATE=false，跳过更新分流规则")
+        print("\nℹ️ RUN_UPDATE=false，跳过更新分流规则与 fallback")
 
     # 全部流程结束提示
     print("\n🎉 脚本全部执行完毕")

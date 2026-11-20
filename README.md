@@ -13,6 +13,7 @@
 - 支持多设备策略按**序号**精确选更：`CF_PROFILE_ID` 逗号分隔登记自定义策略，`CF_PROFILE_INDEX` 指定本次更新哪些序号（`0`=账号默认策略，`1~N`=自定义策略）
 - 提供 `RUN_UPDATE` 总开关，可一键跳过更新（仅演练拉取，不改动线上策略）
 - 支持 `exclude`（CN 直连）和 `include`（仅 CN 走 WARP）两种模式
+- 同步 Local Domain Fallback（自动取 `mydomain.txt` 中的域名），修复 WARP DoH 接管 DNS 导致的国内 CDN 海外调度与内网域名解析失败
 - 通过 GitHub Actions 定时自动运行，无需手动维护
 
 -----
@@ -128,6 +129,19 @@
 - `RUN_UPDATE=true`（默认）：按 `CF_PROFILE_INDEX` 更新对应策略
 - `RUN_UPDATE=false`：只拉取并组装数据、打印统计，**跳过所有 PUT 请求**，不改动任何线上策略，适合演练验证
 
+### 本地域名回退（SYNC_FALLBACK）
+
+Zero Trust 的 DoH 模式会让 WARP 接管全部 DNS 解析，可能引发两类问题：
+
+- 国内网站被 Cloudflare 从海外节点解析，CDN 调度到境外（如 bilibili 解析到美国节点），即使 IP 分流正确也会慢
+- 解析到内网 IP 的自有域名被 Gateway 拒绝返回，直接解析失败
+
+将这类域名加入设备策略的 **Local Domain Fallback** 后，它们的 DNS 会绕过 Gateway、改用本地 DNS 解析，再配合 Split Tunnels 的域名/CIDR 排除实现真正直连。
+
+- `mydomain.txt` 中的全部域名会自动作为 fallback 域名同步（CIDR 不参与），无需额外维护
+- `SYNC_FALLBACK=true`（默认）：随分流规则一起合并进目标策略的 fallback 域名列表（保留 Cloudflare 默认项，只增不删）
+- `SYNC_FALLBACK=false`：跳过 fallback 同步
+
 -----
 
 ## 规则配额分配
@@ -166,6 +180,8 @@ Cloudflare Zero Trust Split Tunnels 单策略最多支持 **4000 条**规则，�
 |[Loyalsoldier/surge-rules](https://github.com/Loyalsoldier/surge-rules) `direct.txt`|通用 CN 直连域名         |备用  |由 `TARGET_COMMON_DOMAIN_NUM` 控制加载条数，当前默认为 `0`（不加载）|
 
 > `mydomain.txt` 中每行一条：以 `*.` 或域名格式书写的视为域名规则（自动补全 `*.` 前缀），符合 CIDR 格式的视为 IP 规则，`#` 开头为注释。
+>
+> `mydomain.txt`、`.env` 含个人配置，均已被 `.gitignore` 排除，请勿提交到公开仓库；仓库只保留 `mydomain.example.txt` 模板。
 
 -----
 
@@ -235,6 +251,9 @@ python cf-zt-cn-split.py
 
 **Q：同步成功后 WARP 客户端需要重启吗？**  
 A：不需要，Cloudflare Zero Trust 策略更新后会自动下发到已连接的 WARP 客户端。
+
+**Q：运行时报 `getaddrinfo failed`（无法解析 api.cloudflare.com）？**  
+A：多为本地 DNS 瞬时故障，先执行 `ipconfig /flushdns` 再重跑；若仍失败，检查系统 DNS 是否正常（`nslookup api.cloudflare.com`）。
 
 **Q：报错 `invalid number of rules, number of rules cannot be greater than 4000`？**  
 A：IP 或域名数据源条目超出上限，脚本已内置截断逻辑，正常情况下不会触发。若触发请检查数据源是否变更。
